@@ -170,169 +170,76 @@ class AutoVisaChecker:
                 # Используем JavaScript для заполнения (Angular не загружается в headless)
                 logger.info("📝 Заполняю форму через JavaScript...")
                 
-                # Скрипт для клика по опциям через их ID
-                fill_form_script = """
-                console.log('==> Начинаю заполнение формы');
+                # Получаем cookies из браузера
+                cookies_dict = {}
+                for cookie in self.driver.get_cookies():
+                    cookies_dict[cookie['name']] = cookie['value']
                 
-                // Функция для клика по mat-select и выбора опции по ID
-                function selectOption(selectId, optionId) {
-                    return new Promise((resolve) => {
-                        const select = document.getElementById(selectId);
-                        if (select) {
-                            select.click();
-                            setTimeout(() => {
-                                const option = document.getElementById(optionId);
-                                if (option) {
-                                    option.click();
-                                    console.log('Clicked:', optionId);
-                                    setTimeout(resolve, 1000);
-                                } else {
-                                    console.error('Option not found:', optionId);
-                                    resolve();
-                                }
-                            }, 1000);
-                        } else {
-                            console.error('Select not found:', selectId);
-                            resolve();
-                        }
-                    });
-                }
+                cookies_str = "; ".join([f"{k}={v}" for k, v in cookies_dict.items()])
+                logger.info(f"✅ Получено {len(cookies_dict)} cookies")
                 
-                // Последовательно заполняем форму
-                async function fillForm() {
-                    console.log('1. Выбираю Application Centre - Vitebsk');
-                    await selectOption('mat-select-0', 'BLRVIT');
-                    
-                    console.log('2. Выбираю Long Term Visa');
-                    await selectOption('mat-select-2', 'BLRLTV');
-                    
-                    console.log('3. Выбираю D - visa');
-                    await selectOption('mat-select-1', 'BLRVI');
-                    
-                    console.log('4. Нажимаю Continue');
-                    setTimeout(() => {
-                        const btn = document.querySelector('button[type="submit"], button.btn-brand-orange');
-                        if (btn && !btn.disabled) {
-                            btn.click();
-                            console.log('Button clicked!');
-                        } else {
-                            console.error('Button not found or disabled');
-                        }
-                    }, 2000);
-                }
-                
-                fillForm();
-                return 'started';
-                """
-                
-                self.driver.execute_script(fill_form_script)
-                logger.info("✅ JavaScript запущен, жду 20 сек...")
-                time.sleep(20)  # Больше времени для заполнения
-                
-                # Проверяем что форма заполнена
-                current_url = self.driver.current_url
-                logger.info(f"DEBUG: Текущий URL: {current_url}")
-                
-                # Если всё еще на той же странице, пробуем форсировать submit
-                if "appointment" not in current_url and "slot" not in current_url:
-                    logger.warning("⚠️ Форма не отправлена, пробую форсировать...")
-                    force_submit = """
-                    const btn = document.querySelector('button.btn-brand-orange');
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.click();
-                        console.log('Forced click!');
-                    }
-                    """
-                    self.driver.execute_script(force_submit)
-                    time.sleep(10)
-                
-                # Проверяем результат - вариант 1
-                logger.info("📊 Проверяю результат для D - visa...")
-                page_text = self.driver.page_source
-                page_lower = page_text.lower()
-                
-                # DEBUG: Показываем что видим на странице
-                logger.info("DEBUG: Проверяю ключевые слова на странице:")
-                logger.info(f"  'no slots available': {'ДА' if 'no slots available' in page_lower else 'НЕТ'}")
-                logger.info(f"  'no appointments': {'ДА' if 'no appointments' in page_lower else 'НЕТ'}")
-                logger.info(f"  'earliest': {'ДА' if 'earliest' in page_lower else 'НЕТ'}")
-                logger.info(f"  'calendar': {'ДА' if 'calendar' in page_lower else 'НЕТ'}")
-                logger.info(f"  'select date': {'ДА' if 'select date' in page_lower else 'НЕТ'}")
-                logger.info(f"  'book appointment': {'ДА' if 'book appointment' in page_lower else 'НЕТ'}")
-                
-                # Сохраняем часть текста для анализа
-                visible_text = self.driver.find_element(By.TAG_NAME, "body").text
-                logger.info(f"DEBUG: Видимый текст (первые 500 символов):")
-                logger.info(f"{visible_text[:500]}...")
+                # Делаем запрос к API напрямую используя cookies браузера
+                api_url = "https://lift-api.vfsglobal.by/appointment/CheckIsSlotAvailable"
                 
                 results = []
                 
-                # ПРАВИЛЬНАЯ проверка: 
-                # 1. Если есть "no slots" - точно нет
-                # 2. Если есть "earliest" или "select a date" - точно есть
-                # 3. Если видим форму подтверждения - форма не отправилась
-                
-                if "no slots available" in page_lower or "no appointments available" in page_lower:
-                    logger.info("  ❌ D - visa: Слотов нет (API ответ)")
-                    results.append({'visa': 'D - visa', 'available': False})
-                elif "please confirm your travel details" in page_lower or "select your country" in page_lower:
-                    logger.warning("  ⚠️ Форма не отправилась! Страница подтверждения деталей")
-                    logger.info("  ❌ D - visa: Проверка не выполнена")
-                    results.append({'visa': 'D - visa', 'available': False})
-                elif "earliest" in page_lower and "date" in page_lower:
-                    logger.info("  🎉 D - visa: СЛОТ НАЙДЕН!")
-                    results.append({'visa': 'D - visa', 'available': True})
-                elif "select a date" in page_lower or "select an appointment" in page_lower:
-                    logger.info("  🎉 D - visa: СЛОТ НАЙДЕН!")
-                    results.append({'visa': 'D - visa', 'available': True})
-                else:
-                    logger.info("  ❓ D - visa: Неясный результат (форма возможно не отправилась)")
-                    results.append({'visa': 'D - visa', 'available': False})
-                
-                # Проверяем вариант 2 - Premium Lounge
-                logger.info("📋 Проверяю D visa - Premium Lounge...")
-                
-                # Возвращаемся и выбираем Premium
-                self.driver.back()
-                time.sleep(3)
-                
-                select_premium_script = """
-                setTimeout(() => {
-                    const select = document.getElementById('mat-select-1');
-                    if (select) {
-                        select.click();
-                        setTimeout(() => {
-                            const option = document.getElementById('BLRVPL');
-                            if (option) {
-                                option.click();
-                                console.log('Premium selected');
-                                setTimeout(() => {
-                                    const btn = document.querySelector('button.btn-brand-orange');
-                                    if (btn) btn.click();
-                                }, 2000);
-                            }
-                        }, 1000);
+                # Проверяем оба типа виз
+                for visa_info in [
+                    {"code": "BLRVI", "name": "D - visa"},
+                    {"code": "BLRVPL", "name": "D visa - Premium Lounge"}
+                ]:
+                    logger.info(f"\n📋 Проверяю {visa_info['name']}...")
+                    
+                    payload = {
+                        "countryCode": "blr",
+                        "loginUser": "Gannibal231@gmail.com",
+                        "missionCode": "bgr",
+                        "payCode": "",
+                        "roleName": "Individual",
+                        "vacCode": "BLRVIT",
+                        "visaCategoryCode": visa_info['code']
                     }
-                }, 1000);
-                """
+                    
+                    headers = {
+                        'Content-Type': 'application/json;charset=UTF-8',
+                        'Accept': 'application/json, text/plain, */*',
+                        'Origin': 'https://services.vfsglobal.by',
+                        'Referer': 'https://services.vfsglobal.by/',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Cookie': cookies_str
+                    }
+                    
+                    # Делаем запрос через requests с cookies от браузера!
+                    try:
+                        response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+                        logger.info(f"  API Статус: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            logger.info(f"  Ответ API: {data}")
+                            
+                            # Проверяем ответ
+                            if 'error' in data and data['error'].get('code') == 1035:
+                                logger.info(f"  ❌ {visa_info['name']}: Слотов нет (error 1035)")
+                                results.append({'visa': visa_info['name'], 'available': False})
+                            elif data.get('earliestDate') or (data.get('earliestSlotLists') and len(data['earliestSlotLists']) > 0):
+                                logger.info(f"  🎉 {visa_info['name']}: СЛОТ НАЙДЕН!")
+                                logger.info(f"  Данные: {data}")
+                                results.append({'visa': visa_info['name'], 'available': True, 'data': data})
+                            else:
+                                logger.info(f"  ❓ {visa_info['name']}: Неясный ответ: {data}")
+                                results.append({'visa': visa_info['name'], 'available': False})
+                        else:
+                            logger.warning(f"  ⚠️ Ошибка API: {response.status_code}")
+                            results.append({'visa': visa_info['name'], 'available': False})
+                    
+                    except Exception as e:
+                        logger.error(f"  ❌ Ошибка запроса: {e}")
+                        results.append({'visa': visa_info['name'], 'available': False})
+                    
+                    time.sleep(2)
                 
-                self.driver.execute_script(select_premium_script)
-                time.sleep(15)
-                
-                page_text = self.driver.page_source.lower()
-                
-                if "no slots available" in page_text or "no appointments" in page_text:
-                    logger.info("  ❌ Premium: Слотов нет")
-                    results.append({'visa': 'D visa - Premium', 'available': False})
-                elif "earliest" in page_text or "calendar" in page_text:
-                    logger.info("  🎉 Premium: СЛОТ НАЙДЕН!")
-                    results.append({'visa': 'D visa - Premium', 'available': True})
-                else:
-                    logger.info("  ❓ Premium: Проверьте вручную")
-                    results.append({'visa': 'D visa - Premium', 'available': False})
-                
-                logger.info("✅ Проверка завершена")
+                logger.info("✅ Проверка через API завершена")
                 return results
                 
             except Exception as e:
