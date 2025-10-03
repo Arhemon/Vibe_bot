@@ -105,118 +105,86 @@ class AutoVisaChecker:
                     logger.info("DEBUG: Скорее всего Angular не загрузился, жду еще...")
                     time.sleep(10)
                 
-                # Пробуем разные селекторы для Country
-                logger.info("  Country...")
-                country = None
-                
-                selectors = [
-                    "mat-select[formcontrolname='countryCode']",
-                    "#mat-select-0",
-                    "mat-select:first-of-type",
-                    ".country-select",
-                ]
-                
-                for selector in selectors:
-                    try:
-                        country = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                        logger.info(f"  ✅ Найдено через: {selector}")
-                        break
-                    except:
-                        continue
-                
-                if not country:
-                    raise Exception("Не найдено поле Country")
-                
-                country.click()
+                # 1. Application Centre (centerCode)
+                logger.info("  1. Application Centre...")
+                center = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "mat-select[formcontrolname='centerCode']")
+                ))
+                logger.info("  ✅ Поле найдено!")
+                center.click()
                 time.sleep(2)
                 
-                belarus = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "//span[contains(text(), 'Belarus')]")
+                # Выбираем Vitebsk
+                vitebsk = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//span[contains(text(), 'Vitebsk')]")
                 ))
-                belarus.click()
+                vitebsk.click()
+                logger.info("  ✅ Vitebsk выбран")
                 time.sleep(3)
                 
-                # Mission  
-                logger.info("  Mission...")
-                mission = wait.until(EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "mat-select[formcontrolname='missionCode']")
+                # 2. Appointment category (selectedSubvisaCategory)
+                logger.info("  2. Appointment category...")
+                category = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "mat-select[formcontrolname='selectedSubvisaCategory']")
                 ))
-                mission.click()
-                time.sleep(1)
-                
-                bulgaria = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "//span[contains(text(), 'Bulgaria')]")
-                ))
-                bulgaria.click()
+                category.click()
                 time.sleep(2)
                 
-                # VAC
-                logger.info("  VAC...")
-                vac = wait.until(EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "mat-select[formcontrolname='vacCode']")
+                # Выбираем Long Term Visa
+                long_term = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//span[contains(text(), 'Long Term') or contains(text(), 'D- Visa') or contains(text(), 'D -')]")
                 ))
-                vac.click()
-                time.sleep(1)
+                long_term.click()
+                logger.info("  ✅ Long Term Visa выбрана")
+                time.sleep(3)
                 
-                vit = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "//span[contains(text(), 'VIT')]")
+                # 3. Sub-category (visaCategoryCode)
+                logger.info("  3. Sub-category...")
+                subcategory = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "mat-select[formcontrolname='visaCategoryCode']")
                 ))
-                vit.click()
+                subcategory.click()
                 time.sleep(2)
                 
-                # Проверяем ОБА типа виз
+                # Выбираем D - visa (первая опция)
+                d_visa = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//span[contains(text(), 'D - visa') or contains(text(), 'D-visa')]")
+                ))
+                d_visa.click()
+                logger.info("  ✅ D-visa выбрана")
+                time.sleep(3)
+                
+                # Нажимаем Continue
+                logger.info("  4. Нажимаю Continue...")
+                btn = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(., 'Continue')]")
+                ))
+                btn.click()
+                logger.info("  ✅ Кнопка нажата!")
+                time.sleep(8)
+                
+                # Проверяем результат
+                logger.info("📊 Читаю результат...")
+                page_text = self.driver.page_source.lower()
+                
                 results = []
                 
-                for visa_type in ['BLRVPL', 'BLRVI']:
-                    logger.info(f"\n📋 Проверяю {visa_type}...")
-                    
-                    # Выбираем тип визы
-                    logger.info("  Visa Category...")
-                    visa_cat = wait.until(EC.element_to_be_clickable(
-                        (By.CSS_SELECTOR, "mat-select[formcontrolname='visaCategoryCode']")
-                    ))
-                    visa_cat.click()
-                    time.sleep(1)
-                    
-                    # Ищем нужную опцию
-                    options = self.driver.find_elements(By.CSS_SELECTOR, "mat-option")
-                    for opt in options:
-                        if visa_type in opt.text or (visa_type == 'BLRVPL' and 'PL' in opt.text):
-                            opt.click()
-                            break
-                    
-                    time.sleep(2)
-                    
-                    # Нажимаем Continue
-                    logger.info("  Нажимаю Continue...")
-                    btn = wait.until(EC.element_to_be_clickable(
-                        (By.XPATH, "//button[@type='submit' or contains(., 'Continue')]")
-                    ))
-                    btn.click()
-                    time.sleep(6)
-                    
-                    # Проверяем результат
-                    page_text = self.driver.page_source.lower()
-                    
-                    if "no slots available" in page_text or "no appointments" in page_text:
-                        logger.info(f"  ❌ {visa_type}: Слотов нет")
-                        results.append({'visa': visa_type, 'available': False})
-                    elif "available" in page_text or "slot" in page_text:
-                        logger.info(f"  🎉 {visa_type}: СЛОТ НАЙДЕН!")
-                        results.append({'visa': visa_type, 'available': True, 'data': 'Slot found via browser'})
+                if "no slots available" in page_text or "no appointments" in page_text:
+                    logger.info("  ❌ Слотов нет")
+                    results.append({'visa': 'D-visa', 'available': False})
+                elif "available" in page_text and "slot" in page_text:
+                    logger.info("  🎉 СЛОТ НАЙДЕН!")
+                    results.append({'visa': 'D-visa', 'available': True, 'data': 'Slot found'})
+                else:
+                    # Проверяем наличие календаря или дат
+                    if "calendar" in page_text or "date" in page_text or "appointment" in page_text:
+                        logger.info("  🎉 ВОЗМОЖНО СЛОТ НАЙДЕН!")
+                        results.append({'visa': 'D-visa', 'available': True, 'data': 'Possible slot'})
                     else:
-                        logger.info(f"  ❓ {visa_type}: Неизвестный статус")
-                        results.append({'visa': visa_type, 'available': False})
-                    
-                    # Возвращаемся назад если не последняя проверка
-                    if visa_type != 'BLRVI':
-                        try:
-                            self.driver.back()
-                            time.sleep(3)
-                        except:
-                            pass
+                        logger.info("  ❓ Неизвестный статус")
+                        results.append({'visa': 'D-visa', 'available': False})
                 
-                logger.info("✅ Проверка через браузер завершена")
+                logger.info("✅ Проверка завершена")
                 return results
                 
             except Exception as e:
