@@ -1,0 +1,28 @@
+# Простой Dockerfile без Chrome (для API версии)
+FROM python:3.11-slim
+
+# Логирование
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Копируем зависимости
+COPY requirements.txt .
+RUN echo "==> Installing Python dependencies..." && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip list && \
+    echo "==> Dependencies installed successfully"
+
+# Копируем код
+COPY main.py .
+RUN echo "==> Bot code copied" && \
+    ls -lh && \
+    head -10 main.py
+
+# Переменные
+ENV CHECK_INTERVAL=180
+
+# Запуск
+CMD echo "==> Starting bot..." && python main.py
+

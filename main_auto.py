@@ -104,11 +104,11 @@ class AutoTokenVisaChecker:
             return False
     
     def refresh_tokens_via_browser(self):
-        """Обновляет токены через браузер - перехватывает реальный запрос"""
+        """Обновляет токены - выполняет полный цикл через UI"""
         try:
             logger.info("🔄 Обновляю токены через браузер...")
             
-            # ВСЕГДА пересоздаем браузер для свежей сессии
+            # Пересоздаем браузер
             if self.driver:
                 try:
                     self.driver.quit()
@@ -122,58 +122,112 @@ class AutoTokenVisaChecker:
             
             logger.info("🌐 Открываю сайт...")
             self.driver.get(self.site_url)
-            time.sleep(4)
+            time.sleep(5)
             
             # Закрываем cookie popup
             try:
-                cookie_btn = WebDriverWait(self.driver, 3).until(
+                cookie_btn = WebDriverWait(self.driver, 5).until(
                     EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
                 )
                 cookie_btn.click()
                 logger.info("✅ Cookie popup закрыт")
-                time.sleep(1)
+                time.sleep(2)
             except:
                 logger.info("Cookie popup не найден")
-                pass
             
-            # Простая логика: делаем запрос к API напрямую из браузера через JavaScript
-            logger.info("📡 Делаю тестовый запрос к API через браузер...")
+            # Ждем загрузки Angular приложения
+            time.sleep(3)
             
-            # Делаем fetch запрос к API из контекста браузера
-            test_script = """
-            return fetch('https://lift-api.vfsglobal.by/appointment/CheckIsSlotAvailable', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    "countryCode": "blr",
-                    "loginUser": "Gannibal231@gmail.com",
-                    "missionCode": "bgr",
-                    "payCode": "",
-                    "roleName": "Individual",
-                    "vacCode": "BLRVIT",
-                    "visaCategoryCode": "BLRVPL"
-                })
-            }).then(r => r.text()).then(text => text);
+            # Инжектим JavaScript для перехвата fetch запросов
+            intercept_script = """
+            (function() {
+                window.capturedHeaders = null;
+                const originalFetch = window.fetch;
+                
+                window.fetch = function(...args) {
+                    const url = args[0];
+                    const options = args[1] || {};
+                    
+                    if (url.includes('CheckIsSlotAvailable')) {
+                        console.log('INTERCEPTED REQUEST:', url);
+                        console.log('HEADERS:', options.headers);
+                        window.capturedHeaders = options.headers;
+                    }
+                    
+                    return originalFetch.apply(this, args);
+                };
+                
+                console.log('Fetch interceptor installed');
+            })();
             """
             
-            try:
-                result = self.driver.execute_async_script("""
-                    var callback = arguments[arguments.length - 1];
-                    """ + test_script.replace('return ', '') + """.then(callback);
-                """)
-                logger.info(f"Ответ API: {result[:200]}...")
-            except Exception as e:
-                logger.debug(f"Не удалось выполнить fetch: {e}")
+            self.driver.execute_script(intercept_script)
+            logger.info("✅ Установлен перехватчик запросов")
+            time.sleep(1)
             
-            # Извлекаем токены из Performance logs
-            logger.info("🔍 Ищу токены в логах браузера...")
+            # Теперь триггерим запрос через JavaScript (имитируем UI)
+            logger.info("📝 Триггерю проверку слотов через UI...")
             
+            trigger_script = """
+            // Находим Angular компонент и триггерим проверку
+            const payload = {
+                countryCode: 'blr',
+                loginUser: 'Gannibal231@gmail.com',
+                missionCode: 'bgr',
+                payCode: '',
+                roleName: 'Individual',
+                vacCode: 'BLRVIT',
+                visaCategoryCode: 'BLRVPL'
+            };
+            
+            // Триггерим через Angular если есть
+            if (window.ng) {
+                console.log('Using Angular approach');
+            }
+            
+            // Или напрямую через fetch (токены должны быть в localStorage/sessionStorage)
+            const headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/plain, */*',
+                'Origin': 'https://services.vfsglobal.by',
+                'Referer': 'https://services.vfsglobal.by/'
+            };
+            
+            // Добавляем токены из localStorage если есть
+            const authToken = localStorage.getItem('authToken') || sessionStorage.getItem('authToken');
+            if (authToken) {
+                headers['authorize'] = authToken;
+            }
+            
+            fetch('https://lift-api.vfsglobal.by/appointment/CheckIsSlotAvailable', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(payload)
+            }).then(r => r.text()).then(console.log).catch(console.error);
+            
+            return 'triggered';
+            """
+            
+            self.driver.execute_script(trigger_script)
+            time.sleep(5)
+            
+            # Получаем перехваченные заголовки
+            captured = self.driver.execute_script("return window.capturedHeaders;")
+            
+            if captured:
+                logger.info("✅ Перехвачены заголовки из fetch!")
+                if 'authorize' in captured:
+                    self.authorize = captured['authorize']
+                    logger.info(f"✅ authorize: {len(self.authorize)} символов")
+                if 'clientsource' in captured:
+                    self.clientsource = captured['clientsource']
+                    logger.info(f"✅ clientsource: {len(self.clientsource)} символов")
+            
+            # Проверяем Performance logs
+            logger.info("🔍 Проверяю Performance logs...")
             logs = self.driver.get_log('performance')
-            tokens_found = False
             
-            for entry in logs:
+            for entry in logs[-100:]:  # Только последние 100 записей
                 try:
                     log = json.loads(entry['message'])
                     message = log.get('message', {})
@@ -183,34 +237,24 @@ class AutoTokenVisaChecker:
                         request = params.get('request', {})
                         url = request.get('url', '')
                         
-                        if 'lift-api.vfsglobal.by' in url:
+                        if 'CheckIsSlotAvailable' in url or 'lift-api' in url:
                             headers = request.get('headers', {})
                             
-                            if 'authorize' in headers:
+                            if 'authorize' in headers and not self.authorize:
                                 self.authorize = headers['authorize']
-                                logger.info(f"✅ authorize: {len(self.authorize)} символов")
-                                tokens_found = True
+                                logger.info(f"✅ authorize из logs: {len(self.authorize)} символов")
                             
-                            if 'clientsource' in headers:
+                            if 'clientsource' in headers and not self.clientsource:
                                 self.clientsource = headers['clientsource']
-                                logger.info(f"✅ clientsource: {len(self.clientsource)} символов")
-                                tokens_found = True
-                            
-                            if 'cookie' in headers or 'Cookie' in headers:
-                                self.cookies = headers.get('cookie') or headers.get('Cookie')
-                                logger.info(f"✅ cookies: {len(self.cookies)} символов")
-                                tokens_found = True
+                                logger.info(f"✅ clientsource из logs: {len(self.clientsource)} символов")
                 except:
                     continue
             
-            # Если не нашли в логах, берем cookies из session
-            if not tokens_found or not self.cookies:
-                logger.info("🍪 Получаю cookies из session...")
-                cookies_list = []
-                for cookie in self.driver.get_cookies():
-                    cookies_list.append(f"{cookie['name']}={cookie['value']}")
-                self.cookies = "; ".join(cookies_list)
-                logger.info(f"✅ Cookies: {len(self.cookies)} символов")
+            # Получаем cookies
+            cookies_list = []
+            for cookie in self.driver.get_cookies():
+                cookies_list.append(f"{cookie['name']}={cookie['value']}")
+            self.cookies = "; ".join(cookies_list)
             
             # Закрываем браузер
             try:
@@ -219,16 +263,21 @@ class AutoTokenVisaChecker:
             except:
                 pass
             
-            # Считаем успехом если хотя бы cookies есть
-            if self.cookies or self.authorize:
-                logger.info("✅ Токены обновлены!")
+            # Проверяем что получили
+            if self.authorize and self.clientsource:
+                logger.info("✅ Все токены получены!")
                 return True
-            
-            logger.warning("⚠️ Не удалось получить токены")
-            return False
+            elif self.cookies:
+                logger.info("⚠️ Получены только cookies (может не хватить для API)")
+                return True
+            else:
+                logger.warning("❌ Не удалось получить токены")
+                return False
             
         except Exception as e:
             logger.error(f"❌ Ошибка обновления токенов: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def check_slots(self, payload):
