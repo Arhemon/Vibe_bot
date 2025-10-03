@@ -226,8 +226,26 @@ class AutoVisaChecker:
                 """
                 
                 self.driver.execute_script(fill_form_script)
-                logger.info("✅ JavaScript запущен")
-                time.sleep(15)  # Даем время на заполнение и отправку
+                logger.info("✅ JavaScript запущен, жду 20 сек...")
+                time.sleep(20)  # Больше времени для заполнения
+                
+                # Проверяем что форма заполнена
+                current_url = self.driver.current_url
+                logger.info(f"DEBUG: Текущий URL: {current_url}")
+                
+                # Если всё еще на той же странице, пробуем форсировать submit
+                if "appointment" not in current_url and "slot" not in current_url:
+                    logger.warning("⚠️ Форма не отправлена, пробую форсировать...")
+                    force_submit = """
+                    const btn = document.querySelector('button.btn-brand-orange');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.click();
+                        console.log('Forced click!');
+                    }
+                    """
+                    self.driver.execute_script(force_submit)
+                    time.sleep(10)
                 
                 # Проверяем результат - вариант 1
                 logger.info("📊 Проверяю результат для D - visa...")
@@ -250,14 +268,26 @@ class AutoVisaChecker:
                 
                 results = []
                 
-                if "no slots available" in page_lower or "no appointments" in page_lower:
-                    logger.info("  ❌ D - visa: Слотов нет")
+                # ПРАВИЛЬНАЯ проверка: 
+                # 1. Если есть "no slots" - точно нет
+                # 2. Если есть "earliest" или "select a date" - точно есть
+                # 3. Если видим форму подтверждения - форма не отправилась
+                
+                if "no slots available" in page_lower or "no appointments available" in page_lower:
+                    logger.info("  ❌ D - visa: Слотов нет (API ответ)")
                     results.append({'visa': 'D - visa', 'available': False})
-                elif "earliest" in page_lower or "calendar" in page_lower or "select date" in page_lower or "book appointment" in page_lower:
+                elif "please confirm your travel details" in page_lower or "select your country" in page_lower:
+                    logger.warning("  ⚠️ Форма не отправилась! Страница подтверждения деталей")
+                    logger.info("  ❌ D - visa: Проверка не выполнена")
+                    results.append({'visa': 'D - visa', 'available': False})
+                elif "earliest" in page_lower and "date" in page_lower:
+                    logger.info("  🎉 D - visa: СЛОТ НАЙДЕН!")
+                    results.append({'visa': 'D - visa', 'available': True})
+                elif "select a date" in page_lower or "select an appointment" in page_lower:
                     logger.info("  🎉 D - visa: СЛОТ НАЙДЕН!")
                     results.append({'visa': 'D - visa', 'available': True})
                 else:
-                    logger.info("  ❓ D - visa: Неясный результат")
+                    logger.info("  ❓ D - visa: Неясный результат (форма возможно не отправилась)")
                     results.append({'visa': 'D - visa', 'available': False})
                 
                 # Проверяем вариант 2 - Premium Lounge
