@@ -136,9 +136,90 @@ class AutoTokenVisaChecker:
                 logger.info("Cookie popup не найден")
             
             # Ждем загрузки Angular приложения
-            time.sleep(3)
+            logger.info("⏳ Жду загрузки Angular приложения...")
+            time.sleep(5)
             
-            # Инжектим JavaScript для перехвата fetch запросов
+            # ВАРИАНТ 1: Физически заполняем форму через клики
+            logger.info("📝 Пробую заполнить форму через клики...")
+            wait = WebDriverWait(self.driver, 15)
+            
+            try:
+                # Country
+                logger.info("  → Выбираю Country...")
+                country_field = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "mat-select[formcontrolname='countryCode']")
+                ))
+                country_field.click()
+                time.sleep(1)
+                
+                belarus_opt = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//mat-option//span[contains(text(), 'Belarus')]")
+                ))
+                belarus_opt.click()
+                time.sleep(2)
+                logger.info("  ✅ Belarus выбран")
+                
+                # Mission
+                logger.info("  → Выбираю Mission...")
+                mission_field = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "mat-select[formcontrolname='missionCode']")
+                ))
+                mission_field.click()
+                time.sleep(1)
+                
+                bulgaria_opt = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//mat-option//span[contains(text(), 'Bulgaria')]")
+                ))
+                bulgaria_opt.click()
+                time.sleep(2)
+                logger.info("  ✅ Bulgaria выбрана")
+                
+                # VAC
+                logger.info("  → Выбираю VAC...")
+                vac_field = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "mat-select[formcontrolname='vacCode']")
+                ))
+                vac_field.click()
+                time.sleep(1)
+                
+                vac_opt = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//mat-option[contains(., 'VIT')]")
+                ))
+                vac_opt.click()
+                time.sleep(2)
+                logger.info("  ✅ VAC выбран")
+                
+                # Visa Category
+                logger.info("  → Выбираю Visa Category...")
+                visa_field = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "mat-select[formcontrolname='visaCategoryCode']")
+                ))
+                visa_field.click()
+                time.sleep(1)
+                
+                # Пробуем найти любую опцию визы
+                visa_opts = self.driver.find_elements(By.CSS_SELECTOR, "mat-option")
+                if len(visa_opts) > 0:
+                    visa_opts[0].click()
+                    logger.info("  ✅ Visa Category выбрана")
+                    time.sleep(2)
+                
+                # Нажимаем Continue
+                logger.info("  → Нажимаю Continue...")
+                continue_btn = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(., 'Continue') or contains(., 'Submit')]")
+                ))
+                continue_btn.click()
+                logger.info("  ✅ Кнопка нажата!")
+                time.sleep(5)
+                
+                logger.info("✅ Форма заполнена успешно!")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось заполнить форму через клики: {e}")
+                logger.info("Пробую альтернативный способ...")
+            
+            # ВАРИАНТ 2 (запасной): Инжектим JavaScript для перехвата fetch запросов
             intercept_script = """
             (function() {
                 window.capturedHeaders = null;
@@ -216,12 +297,21 @@ class AutoTokenVisaChecker:
             
             if captured:
                 logger.info("✅ Перехвачены заголовки из fetch!")
+                logger.info(f"DEBUG: Перехваченные заголовки: {list(captured.keys()) if isinstance(captured, dict) else captured}")
+                
                 if 'authorize' in captured:
                     self.authorize = captured['authorize']
                     logger.info(f"✅ authorize: {len(self.authorize)} символов")
+                else:
+                    logger.warning("⚠️ 'authorize' НЕ найден в перехваченных заголовках")
+                    
                 if 'clientsource' in captured:
                     self.clientsource = captured['clientsource']
                     logger.info(f"✅ clientsource: {len(self.clientsource)} символов")
+                else:
+                    logger.warning("⚠️ 'clientsource' НЕ найден в перехваченных заголовках")
+            else:
+                logger.warning("⚠️ Заголовки не были перехвачены")
             
             # Проверяем Performance logs
             logger.info("🔍 Проверяю Performance logs...")
