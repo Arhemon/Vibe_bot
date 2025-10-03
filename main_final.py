@@ -186,47 +186,73 @@ class AutoVisaChecker:
             except:
                 pass
             
-            # ВАЖНО: Сначала делаем ЛОГИН чтобы получить токены authorize/clientsource
-            logger.info("🔐 Пробую залогиниться на сайте...")
+            # ВАЖНО: Делаем API логин с captcha решением
+            logger.info("🔐 Выполняю API логин...")
             
-            login_url = "https://services.vfsglobal.by/user/login"
-            self.driver.get(login_url)
-            time.sleep(5)
-            
-            # Пытаемся найти поля логина
             try:
-                email_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='username'], #email"))
+                # Получаем captcha токен от 2captcha если доступен
+                captcha_token = ""
+                
+                if self.solver:
+                    try:
+                        logger.info("  🔓 Решаю captcha для логина через 2captcha...")
+                        # Решаем Cloudflare Turnstile для логина
+                        result = self.solver.turnstile(
+                            sitekey='0x4AAAAAAAgoQ7yIbKdI',
+                            url='https://lift-api.vfsglobal.by/user/login'
+                        )
+                        captcha_token = result['code']
+                        logger.info("  ✅ Captcha решена!")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ Ошибка решения captcha: {e}")
+                
+                # Получаем cookies из браузера для логина
+                cookies_dict = {}
+                for cookie in self.driver.get_cookies():
+                    cookies_dict[cookie['name']] = cookie['value']
+                cookies_str = "; ".join([f"{k}={v}" for k, v in cookies_dict.items()])
+                
+                # Делаем API логин
+                login_payload = {
+                    "username": "Gannibal231@gmail.com",
+                    "password": "Xfryjhbc11@",
+                    "missioncode": "bgr",
+                    "countrycode": "blr",
+                    "languageCode": "en-US"
+                }
+                
+                if captcha_token:
+                    login_payload["captcha_version"] = "cloudflare-v1"
+                    login_payload["captcha_api_key"] = captcha_token
+                
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Origin': 'https://services.vfsglobal.by',
+                    'Referer': 'https://services.vfsglobal.by/',
+                    'Cookie': cookies_str
+                }
+                
+                login_response = requests.post(
+                    'https://lift-api.vfsglobal.by/user/login',
+                    json=login_payload,
+                    headers=headers,
+                    timeout=30
                 )
-                password_field = self.driver.find_element(By.CSS_SELECTOR, "input[type='password'], #password")
                 
-                # Вводим данные
-                email_field.send_keys("Gannibal231@gmail.com")
-                password_field.send_keys("Xfryjhbc11@")
+                logger.info(f"  Статус логина: {login_response.status_code}")
                 
-                time.sleep(2)
-                
-                # Нажимаем Login
-                login_btn = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-                login_btn.click()
-                
-                logger.info("✅ Логин отправлен, жду...")
-                time.sleep(10)
-                
-                # Проверяем успешность логина
-                current_url = self.driver.current_url
-                if "login" not in current_url.lower():
-                    logger.info("✅ Логин успешен!")
+                if login_response.status_code == 200:
+                    login_data = login_response.json()
+                    logger.info("  ✅ Логин успешен!")
+                    logger.info(f"  DEBUG: {login_data}")
                 else:
-                    logger.warning("⚠️ Логин возможно не прошел")
+                    logger.warning(f"  ⚠️ Логин не успешен: {login_response.text[:200]}")
                 
             except Exception as e:
-                logger.warning(f"⚠️ Не удалось залогиниться: {e}")
-                logger.info("Продолжаю без логина...")
+                logger.warning(f"⚠️ Ошибка API логина: {e}")
             
-            # Возвращаемся на главную
-            self.driver.get(self.site_url)
-            time.sleep(4)
+            # Обновляем cookies после логина
+            time.sleep(3)
             
             # Заполняем форму - пробуем несколько способов
             logger.info("📝 Заполняю форму...")
