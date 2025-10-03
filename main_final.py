@@ -6,12 +6,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import logging
-from selenium import webdriver
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import json
 
 # Настройка логирования
@@ -39,20 +37,23 @@ class AutoVisaChecker:
         self.driver = None
     
     def init_browser(self):
-        """Инициализирует браузер с перехватом Network"""
+        """Инициализирует браузер с обходом Cloudflare"""
         try:
-            chrome_options = Options()
-            chrome_options.add_argument('--headless')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--window-size=1920,1080')
+            options = uc.ChromeOptions()
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--window-size=1920,1080')
             
-            # Включаем Performance logging для перехвата запросов
-            chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+            # undetected-chromedriver автоматически обходит Cloudflare!
+            self.driver = uc.Chrome(
+                options=options,
+                headless=True,
+                use_subprocess=False,
+                version_main=141  # Версия Chrome
+            )
             
-            self.driver = webdriver.Chrome(options=chrome_options)
-            logger.info("✅ Браузер готов")
+            logger.info("✅ Браузер готов (undetected mode)")
             return True
         except Exception as e:
             logger.error(f"❌ Ошибка браузера: {e}")
