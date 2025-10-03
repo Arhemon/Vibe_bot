@@ -169,18 +169,33 @@ class AutoVisaChecker:
                 
                 # Проверяем результат - вариант 1
                 logger.info("📊 Проверяю результат для D - visa...")
-                page_text = self.driver.page_source.lower()
+                page_text = self.driver.page_source
+                page_lower = page_text.lower()
+                
+                # DEBUG: Показываем что видим на странице
+                logger.info("DEBUG: Проверяю ключевые слова на странице:")
+                logger.info(f"  'no slots available': {'ДА' if 'no slots available' in page_lower else 'НЕТ'}")
+                logger.info(f"  'no appointments': {'ДА' if 'no appointments' in page_lower else 'НЕТ'}")
+                logger.info(f"  'earliest': {'ДА' if 'earliest' in page_lower else 'НЕТ'}")
+                logger.info(f"  'calendar': {'ДА' if 'calendar' in page_lower else 'НЕТ'}")
+                logger.info(f"  'select date': {'ДА' if 'select date' in page_lower else 'НЕТ'}")
+                logger.info(f"  'book appointment': {'ДА' if 'book appointment' in page_lower else 'НЕТ'}")
+                
+                # Сохраняем часть текста для анализа
+                visible_text = self.driver.find_element(By.TAG_NAME, "body").text
+                logger.info(f"DEBUG: Видимый текст (первые 500 символов):")
+                logger.info(f"{visible_text[:500]}...")
                 
                 results = []
                 
-                if "no slots available" in page_text or "no appointments" in page_text:
+                if "no slots available" in page_lower or "no appointments" in page_lower:
                     logger.info("  ❌ D - visa: Слотов нет")
                     results.append({'visa': 'D - visa', 'available': False})
-                elif "earliest" in page_text or "calendar" in page_text or "select date" in page_text:
+                elif "earliest" in page_lower or "calendar" in page_lower or "select date" in page_lower or "book appointment" in page_lower:
                     logger.info("  🎉 D - visa: СЛОТ НАЙДЕН!")
                     results.append({'visa': 'D - visa', 'available': True})
                 else:
-                    logger.info("  ❓ D - visa: Проверьте вручную")
+                    logger.info("  ❓ D - visa: Неясный результат")
                     results.append({'visa': 'D - visa', 'available': False})
                 
                 # Проверяем вариант 2 - Premium Lounge
