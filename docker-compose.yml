@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  visa-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: visa-slot-checker
+    restart: unless-stopped
+    environment:
+      # Email настройки
+      - SENDER_EMAIL=gannibal231@gmail.com
+      - SENDER_PASSWORD=vgum napu egze erwp
+      - SMTP_SERVER=smtp.gmail.com
+      - SMTP_PORT=587
+      
+      # Интервал проверки (в секундах)
+      - CHECK_INTERVAL=300
+      
+      # Headless режим
+      - HEADLESS=true
+    
+    # Логи
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
