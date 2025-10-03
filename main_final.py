@@ -149,7 +149,46 @@ class AutoVisaChecker:
             except:
                 pass
             
-            # Ждем Angular
+            # ВАЖНО: Сначала делаем ЛОГИН чтобы получить токены authorize/clientsource
+            logger.info("🔐 Пробую залогиниться на сайте...")
+            
+            login_url = "https://services.vfsglobal.by/user/login"
+            self.driver.get(login_url)
+            time.sleep(5)
+            
+            # Пытаемся найти поля логина
+            try:
+                email_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email'], input[name='username'], #email"))
+                )
+                password_field = self.driver.find_element(By.CSS_SELECTOR, "input[type='password'], #password")
+                
+                # Вводим данные
+                email_field.send_keys("Gannibal231@gmail.com")
+                password_field.send_keys("Xfryjhbc11@")
+                
+                time.sleep(2)
+                
+                # Нажимаем Login
+                login_btn = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                login_btn.click()
+                
+                logger.info("✅ Логин отправлен, жду...")
+                time.sleep(10)
+                
+                # Проверяем успешность логина
+                current_url = self.driver.current_url
+                if "login" not in current_url.lower():
+                    logger.info("✅ Логин успешен!")
+                else:
+                    logger.warning("⚠️ Логин возможно не прошел")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось залогиниться: {e}")
+                logger.info("Продолжаю без логина...")
+            
+            # Возвращаемся на главную
+            self.driver.get(self.site_url)
             time.sleep(4)
             
             # Заполняем форму - пробуем несколько способов
