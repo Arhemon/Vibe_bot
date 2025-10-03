@@ -105,84 +105,125 @@ class AutoVisaChecker:
                     logger.info("DEBUG: Скорее всего Angular не загрузился, жду еще...")
                     time.sleep(10)
                 
-                # 1. Application Centre (centerCode)
-                logger.info("  1. Application Centre...")
-                center = wait.until(EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "mat-select[formcontrolname='centerCode']")
-                ))
-                logger.info("  ✅ Поле найдено!")
-                center.click()
-                time.sleep(2)
+                # Используем JavaScript для заполнения (Angular не загружается в headless)
+                logger.info("📝 Заполняю форму через JavaScript...")
                 
-                # Выбираем Vitebsk
-                vitebsk = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "//span[contains(text(), 'Vitebsk')]")
-                ))
-                vitebsk.click()
-                logger.info("  ✅ Vitebsk выбран")
-                time.sleep(3)
+                # Скрипт для клика по опциям через их ID
+                fill_form_script = """
+                console.log('==> Начинаю заполнение формы');
                 
-                # 2. Appointment category (selectedSubvisaCategory)
-                logger.info("  2. Appointment category...")
-                category = wait.until(EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "mat-select[formcontrolname='selectedSubvisaCategory']")
-                ))
-                category.click()
-                time.sleep(2)
+                // Функция для клика по mat-select и выбора опции по ID
+                function selectOption(selectId, optionId) {
+                    return new Promise((resolve) => {
+                        const select = document.getElementById(selectId);
+                        if (select) {
+                            select.click();
+                            setTimeout(() => {
+                                const option = document.getElementById(optionId);
+                                if (option) {
+                                    option.click();
+                                    console.log('Clicked:', optionId);
+                                    setTimeout(resolve, 1000);
+                                } else {
+                                    console.error('Option not found:', optionId);
+                                    resolve();
+                                }
+                            }, 1000);
+                        } else {
+                            console.error('Select not found:', selectId);
+                            resolve();
+                        }
+                    });
+                }
                 
-                # Выбираем Long Term Visa
-                long_term = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "//span[contains(text(), 'Long Term') or contains(text(), 'D- Visa') or contains(text(), 'D -')]")
-                ))
-                long_term.click()
-                logger.info("  ✅ Long Term Visa выбрана")
-                time.sleep(3)
+                // Последовательно заполняем форму
+                async function fillForm() {
+                    console.log('1. Выбираю Application Centre - Vitebsk');
+                    await selectOption('mat-select-0', 'BLRVIT');
+                    
+                    console.log('2. Выбираю Long Term Visa');
+                    await selectOption('mat-select-2', 'BLRLTV');
+                    
+                    console.log('3. Выбираю D - visa');
+                    await selectOption('mat-select-1', 'BLRVI');
+                    
+                    console.log('4. Нажимаю Continue');
+                    setTimeout(() => {
+                        const btn = document.querySelector('button[type="submit"], button.btn-brand-orange');
+                        if (btn && !btn.disabled) {
+                            btn.click();
+                            console.log('Button clicked!');
+                        } else {
+                            console.error('Button not found or disabled');
+                        }
+                    }, 2000);
+                }
                 
-                # 3. Sub-category (visaCategoryCode)
-                logger.info("  3. Sub-category...")
-                subcategory = wait.until(EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "mat-select[formcontrolname='visaCategoryCode']")
-                ))
-                subcategory.click()
-                time.sleep(2)
+                fillForm();
+                return 'started';
+                """
                 
-                # Выбираем D - visa (первая опция)
-                d_visa = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "//span[contains(text(), 'D - visa') or contains(text(), 'D-visa')]")
-                ))
-                d_visa.click()
-                logger.info("  ✅ D-visa выбрана")
-                time.sleep(3)
+                self.driver.execute_script(fill_form_script)
+                logger.info("✅ JavaScript запущен")
+                time.sleep(15)  # Даем время на заполнение и отправку
                 
-                # Нажимаем Continue
-                logger.info("  4. Нажимаю Continue...")
-                btn = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "//button[contains(., 'Continue')]")
-                ))
-                btn.click()
-                logger.info("  ✅ Кнопка нажата!")
-                time.sleep(8)
-                
-                # Проверяем результат
-                logger.info("📊 Читаю результат...")
+                # Проверяем результат - вариант 1
+                logger.info("📊 Проверяю результат для D - visa...")
                 page_text = self.driver.page_source.lower()
                 
                 results = []
                 
                 if "no slots available" in page_text or "no appointments" in page_text:
-                    logger.info("  ❌ Слотов нет")
-                    results.append({'visa': 'D-visa', 'available': False})
-                elif "available" in page_text and "slot" in page_text:
-                    logger.info("  🎉 СЛОТ НАЙДЕН!")
-                    results.append({'visa': 'D-visa', 'available': True, 'data': 'Slot found'})
+                    logger.info("  ❌ D - visa: Слотов нет")
+                    results.append({'visa': 'D - visa', 'available': False})
+                elif "earliest" in page_text or "calendar" in page_text or "select date" in page_text:
+                    logger.info("  🎉 D - visa: СЛОТ НАЙДЕН!")
+                    results.append({'visa': 'D - visa', 'available': True})
                 else:
-                    # Проверяем наличие календаря или дат
-                    if "calendar" in page_text or "date" in page_text or "appointment" in page_text:
-                        logger.info("  🎉 ВОЗМОЖНО СЛОТ НАЙДЕН!")
-                        results.append({'visa': 'D-visa', 'available': True, 'data': 'Possible slot'})
-                    else:
-                        logger.info("  ❓ Неизвестный статус")
-                        results.append({'visa': 'D-visa', 'available': False})
+                    logger.info("  ❓ D - visa: Проверьте вручную")
+                    results.append({'visa': 'D - visa', 'available': False})
+                
+                # Проверяем вариант 2 - Premium Lounge
+                logger.info("📋 Проверяю D visa - Premium Lounge...")
+                
+                # Возвращаемся и выбираем Premium
+                self.driver.back()
+                time.sleep(3)
+                
+                select_premium_script = """
+                setTimeout(() => {
+                    const select = document.getElementById('mat-select-1');
+                    if (select) {
+                        select.click();
+                        setTimeout(() => {
+                            const option = document.getElementById('BLRVPL');
+                            if (option) {
+                                option.click();
+                                console.log('Premium selected');
+                                setTimeout(() => {
+                                    const btn = document.querySelector('button.btn-brand-orange');
+                                    if (btn) btn.click();
+                                }, 2000);
+                            }
+                        }, 1000);
+                    }
+                }, 1000);
+                """
+                
+                self.driver.execute_script(select_premium_script)
+                time.sleep(15)
+                
+                page_text = self.driver.page_source.lower()
+                
+                if "no slots available" in page_text or "no appointments" in page_text:
+                    logger.info("  ❌ Premium: Слотов нет")
+                    results.append({'visa': 'D visa - Premium', 'available': False})
+                elif "earliest" in page_text or "calendar" in page_text:
+                    logger.info("  🎉 Premium: СЛОТ НАЙДЕН!")
+                    results.append({'visa': 'D visa - Premium', 'available': True})
+                else:
+                    logger.info("  ❓ Premium: Проверьте вручную")
+                    results.append({'visa': 'D visa - Premium', 'available': False})
                 
                 logger.info("✅ Проверка завершена")
                 return results
