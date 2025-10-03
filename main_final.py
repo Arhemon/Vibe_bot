@@ -11,6 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium_stealth import stealth
+from twocaptcha import TwoCaptcha
 import json
 
 # Настройка логирования
@@ -31,8 +32,12 @@ class AutoVisaChecker:
         self.sender_email = os.getenv('SENDER_EMAIL')
         self.sender_password = os.getenv('SENDER_PASSWORD')
         
-        # Интервал проверки (3 минуты чтобы токены не истекали)
-        self.check_interval = int(os.getenv('CHECK_INTERVAL', '180'))
+        # Интервал проверки (500 сек = 8.3 минуты для экономии captcha)
+        self.check_interval = int(os.getenv('CHECK_INTERVAL', '500'))
+        
+        # 2Captcha API ключ
+        self.captcha_api_key = os.getenv('CAPTCHA_API_KEY', '')
+        self.solver = TwoCaptcha(self.captcha_api_key) if self.captcha_api_key else None
         
         self.notification_sent = False
         self.driver = None
@@ -117,25 +122,57 @@ class AutoVisaChecker:
             logger.info("🌐 Захожу на сайт...")
             self.driver.get(self.site_url)
             
-            # Ждем прохождения Cloudflare challenge
-            logger.info("⏳ Жду прохождения Cloudflare challenge...")
-            time.sleep(10)
+            # Решаем Cloudflare Turnstile через 2captcha
+            logger.info("🔓 Решаю Cloudflare challenge через 2captcha...")
             
-            # Проверяем прошли ли Cloudflare
-            page_source = self.driver.page_source.lower()
-            if "sorry, you have been blocked" in page_source or "cloudflare" in page_source:
-                logger.warning("⚠️ Cloudflare блокирует, жду еще 10 сек...")
-                time.sleep(10)
-                
-                # Проверяем снова
-                page_source = self.driver.page_source.lower()
-                if "sorry, you have been blocked" in page_source:
-                    logger.error("❌ Cloudflare НЕ ПРОПУСТИЛ!")
-                    logger.info("💡 Попробую обновить страницу...")
-                    self.driver.refresh()
-                    time.sleep(10)
+            if self.solver:
+                try:
+                    # Ждем появления Cloudflare challenge
+                    time.sleep(5)
+                    
+                    # Ищем sitekey Cloudflare
+                    page_source = self.driver.page_source
+                    
+                    if "challenges.cloudflare.com" in page_source or "cf-challenge" in page_source:
+                        logger.info("  Обнаружен Cloudflare challenge, решаю...")
+                        
+                        # Решаем Cloudflare Turnstile
+                        result = self.solver.turnstile(
+                            sitekey='0x4AAAAAAAgoQ7yIbKdI',  # Cloudflare sitekey
+                            url=self.site_url
+                        )
+                        
+                        # Инжектим токен решения
+                        token = result['code']
+                        logger.info(f"  ✅ Captcha решена! Токен получен")
+                        
+                        # Используем токен в форме
+                        inject_script = f"""
+                        document.querySelector('[name="cf-turnstile-response"]').value = '{token}';
+                        """
+                        self.driver.execute_script(inject_script)
+                        time.sleep(2)
+                        
+                        logger.info("  ✅ Cloudflare обойден через 2captcha!")
+                    else:
+                        logger.info("  ✅ Cloudflare challenge не обнаружен")
+                    
+                except Exception as e:
+                    logger.warning(f"  ⚠️ Ошибка 2captcha: {e}")
+                    logger.info("  Пробую без решения captcha...")
             else:
-                logger.info("✅ Cloudflare пройден!")
+                logger.warning("⚠️ CAPTCHA_API_KEY не задан, пробую обойти автоматически...")
+                time.sleep(10)
+            
+            # Проверяем результат
+            time.sleep(5)
+            page_source = self.driver.page_source.lower()
+            
+            if "sorry, you have been blocked" in page_source:
+                logger.error("❌ Cloudflare всё еще блокирует!")
+                return []
+            else:
+                logger.info("✅ Доступ к сайту получен!")
             
             time.sleep(3)
             

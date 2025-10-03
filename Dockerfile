@@ -51,7 +51,7 @@ RUN echo "==> Bot code ready!"
 
 # Переменные
 ENV HEADLESS=true
-ENV CHECK_INTERVAL=180
+ENV CHECK_INTERVAL=500
 
 # Запуск
 CMD python main.py
