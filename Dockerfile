@@ -35,12 +35,12 @@ RUN echo "==> Installing system dependencies..." && \
     && rm -rf /var/lib/apt/lists/* \
     && echo "==> System dependencies installed successfully"
 
-# Устанавливаем Google Chrome
+# Устанавливаем Google Chrome (новый способ без apt-key)
 RUN echo "==> Installing Google Chrome..." && \
-    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
-    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list && \
+    wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
     apt-get update && \
-    apt-get install -y google-chrome-stable && \
+    apt-get install -y /tmp/google-chrome-stable_current_amd64.deb && \
+    rm /tmp/google-chrome-stable_current_amd64.deb && \
     rm -rf /var/lib/apt/lists/* && \
     google-chrome --version && \
     echo "==> Google Chrome installed successfully"
