@@ -90,24 +90,51 @@ class AutoVisaChecker:
             # Ждем Angular
             time.sleep(4)
             
-            # Заполняем форму РЕАЛЬНЫМИ КЛИКАМИ
+            # Заполняем форму - пробуем несколько способов
             logger.info("📝 Заполняю форму...")
-            wait = WebDriverWait(self.driver, 20)
+            wait = WebDriverWait(self.driver, 30)
             
             try:
-                # Country
+                # Сохраняем HTML для отладки
+                logger.info("DEBUG: Проверяю наличие элементов на странице...")
+                page_source = self.driver.page_source
+                if 'mat-select' in page_source:
+                    logger.info("DEBUG: mat-select элементы найдены в HTML")
+                else:
+                    logger.warning("DEBUG: mat-select НЕ НАЙДЕНЫ в HTML!")
+                    logger.info("DEBUG: Скорее всего Angular не загрузился, жду еще...")
+                    time.sleep(10)
+                
+                # Пробуем разные селекторы для Country
                 logger.info("  Country...")
-                country = wait.until(EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "mat-select[formcontrolname='countryCode']")
-                ))
+                country = None
+                
+                selectors = [
+                    "mat-select[formcontrolname='countryCode']",
+                    "#mat-select-0",
+                    "mat-select:first-of-type",
+                    ".country-select",
+                ]
+                
+                for selector in selectors:
+                    try:
+                        country = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                        logger.info(f"  ✅ Найдено через: {selector}")
+                        break
+                    except:
+                        continue
+                
+                if not country:
+                    raise Exception("Не найдено поле Country")
+                
                 country.click()
-                time.sleep(1)
+                time.sleep(2)
                 
                 belarus = wait.until(EC.element_to_be_clickable(
                     (By.XPATH, "//span[contains(text(), 'Belarus')]")
                 ))
                 belarus.click()
-                time.sleep(2)
+                time.sleep(3)
                 
                 # Mission  
                 logger.info("  Mission...")
