@@ -10,6 +10,7 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium_stealth import stealth
 import json
 
 # Настройка логирования
@@ -37,26 +38,65 @@ class AutoVisaChecker:
         self.driver = None
     
     def init_browser(self):
-        """Инициализирует браузер с обходом Cloudflare"""
+        """Инициализирует браузер с МАКСИМАЛЬНЫМ обходом Cloudflare"""
         try:
+            logger.info("🔧 Настраиваю стелс-браузер...")
+            
             options = uc.ChromeOptions()
+            
+            # Базовые параметры
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--disable-infobars')
+            options.add_argument('--disable-notifications')
+            options.add_argument('--disable-popup-blocking')
             options.add_argument('--window-size=1920,1080')
             
-            # undetected-chromedriver автоматически обходит Cloudflare!
+            # Антидетект параметры
+            options.add_argument('--disable-web-security')
+            options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+            options.add_argument('--allow-running-insecure-content')
+            options.add_argument('--disable-webgl')
+            options.add_argument('--disable-javascript-harmony-shipping')
+            
+            # User agent как у реального пользователя
+            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36')
+            
+            # Создаем драйвер
+            logger.info("🚀 Запускаю undetected-chromedriver...")
             self.driver = uc.Chrome(
                 options=options,
                 headless=True,
                 use_subprocess=False,
-                version_main=141  # Версия Chrome
+                version_main=141
             )
             
-            logger.info("✅ Браузер готов (undetected mode)")
+            # Применяем selenium-stealth для дополнительной маскировки
+            logger.info("🎭 Применяю stealth плагин...")
+            stealth(self.driver,
+                languages=["en-US", "en"],
+                vendor="Google Inc.",
+                platform="Win32",
+                webgl_vendor="Intel Inc.",
+                renderer="Intel Iris OpenGL Engine",
+                fix_hairline=True,
+            )
+            
+            # Устанавливаем дополнительные свойства через JavaScript
+            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+            })
+            
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            logger.info("✅ Браузер готов (FULL STEALTH MODE)")
             return True
+            
         except Exception as e:
             logger.error(f"❌ Ошибка браузера: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def get_fresh_tokens_and_check_slots(self):
@@ -76,7 +116,28 @@ class AutoVisaChecker:
             
             logger.info("🌐 Захожу на сайт...")
             self.driver.get(self.site_url)
-            time.sleep(6)
+            
+            # Ждем прохождения Cloudflare challenge
+            logger.info("⏳ Жду прохождения Cloudflare challenge...")
+            time.sleep(10)
+            
+            # Проверяем прошли ли Cloudflare
+            page_source = self.driver.page_source.lower()
+            if "sorry, you have been blocked" in page_source or "cloudflare" in page_source:
+                logger.warning("⚠️ Cloudflare блокирует, жду еще 10 сек...")
+                time.sleep(10)
+                
+                # Проверяем снова
+                page_source = self.driver.page_source.lower()
+                if "sorry, you have been blocked" in page_source:
+                    logger.error("❌ Cloudflare НЕ ПРОПУСТИЛ!")
+                    logger.info("💡 Попробую обновить страницу...")
+                    self.driver.refresh()
+                    time.sleep(10)
+            else:
+                logger.info("✅ Cloudflare пройден!")
+            
+            time.sleep(3)
             
             # Закрываем popup
             try:
