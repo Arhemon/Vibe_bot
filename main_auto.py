@@ -36,8 +36,8 @@ class AutoTokenVisaChecker:
         self.sender_email = os.getenv('SENDER_EMAIL')
         self.sender_password = os.getenv('SENDER_PASSWORD')
         
-        # Интервал проверки
-        self.check_interval = int(os.getenv('CHECK_INTERVAL', '300'))
+        # Интервал проверки (180 сек = 3 минуты, чтобы токены не истекали)
+        self.check_interval = int(os.getenv('CHECK_INTERVAL', '180'))
         
         # Токены (будут обновляться автоматически)
         self.authorize = ''
@@ -104,69 +104,74 @@ class AutoTokenVisaChecker:
             return False
     
     def refresh_tokens_via_browser(self):
-        """Обновляет токены через браузер (автоматически)"""
+        """Обновляет токены через браузер - перехватывает реальный запрос"""
         try:
             logger.info("🔄 Обновляю токены через браузер...")
             
-            if not self.driver:
-                if not self.init_browser():
-                    return False
+            # ВСЕГДА пересоздаем браузер для свежей сессии
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
             
-            # Открываем сайт
+            if not self.init_browser():
+                logger.error("❌ Не удалось инициализировать браузер")
+                return False
+            
+            logger.info("🌐 Открываю сайт...")
             self.driver.get(self.site_url)
-            time.sleep(5)
+            time.sleep(4)
             
             # Закрываем cookie popup
             try:
-                cookie_btn = WebDriverWait(self.driver, 5).until(
+                cookie_btn = WebDriverWait(self.driver, 3).until(
                     EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
                 )
                 cookie_btn.click()
-                time.sleep(2)
+                logger.info("✅ Cookie popup закрыт")
+                time.sleep(1)
             except:
+                logger.info("Cookie popup не найден")
                 pass
             
-            # Заполняем форму автоматически через JavaScript
-            logger.info("📝 Заполняю форму автоматически...")
+            # Простая логика: делаем запрос к API напрямую из браузера через JavaScript
+            logger.info("📡 Делаю тестовый запрос к API через браузер...")
             
-            # Скрипт для автоматического заполнения Angular Material формы
-            fill_script = """
-            // Функция для клика и выбора опции в mat-select
-            function selectMatOption(selectId, optionText) {
-                const select = document.querySelector(selectId);
-                if (select) {
-                    select.click();
-                    setTimeout(() => {
-                        const options = document.querySelectorAll('mat-option');
-                        for (let opt of options) {
-                            if (opt.innerText.includes(optionText)) {
-                                opt.click();
-                                break;
-                            }
-                        }
-                    }, 500);
-                }
-            }
-            
-            setTimeout(() => selectMatOption('[formcontrolname="countryCode"]', 'Belarus'), 1000);
-            setTimeout(() => selectMatOption('[formcontrolname="missionCode"]', 'Bulgaria'), 2000);
-            setTimeout(() => selectMatOption('[formcontrolname="vacCode"]', 'VIT'), 3000);
-            setTimeout(() => selectMatOption('[formcontrolname="visaCategoryCode"]', 'PL'), 4000);
-            
-            // Нажимаем кнопку Continue
-            setTimeout(() => {
-                const btn = document.querySelector('button[type="submit"]');
-                if (btn) btn.click();
-            }, 5000);
+            # Делаем fetch запрос к API из контекста браузера
+            test_script = """
+            return fetch('https://lift-api.vfsglobal.by/appointment/CheckIsSlotAvailable', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    "countryCode": "blr",
+                    "loginUser": "Gannibal231@gmail.com",
+                    "missionCode": "bgr",
+                    "payCode": "",
+                    "roleName": "Individual",
+                    "vacCode": "BLRVIT",
+                    "visaCategoryCode": "BLRVPL"
+                })
+            }).then(r => r.text()).then(text => text);
             """
             
-            self.driver.execute_script(fill_script)
-            time.sleep(8)
+            try:
+                result = self.driver.execute_async_script("""
+                    var callback = arguments[arguments.length - 1];
+                    """ + test_script.replace('return ', '') + """.then(callback);
+                """)
+                logger.info(f"Ответ API: {result[:200]}...")
+            except Exception as e:
+                logger.debug(f"Не удалось выполнить fetch: {e}")
             
-            # Извлекаем токены из Network logs
-            logger.info("🔍 Извлекаю токены из логов браузера...")
+            # Извлекаем токены из Performance logs
+            logger.info("🔍 Ищу токены в логах браузера...")
             
             logs = self.driver.get_log('performance')
+            tokens_found = False
             
             for entry in logs:
                 try:
@@ -178,39 +183,48 @@ class AutoTokenVisaChecker:
                         request = params.get('request', {})
                         url = request.get('url', '')
                         
-                        if 'CheckIsSlotAvailable' in url:
+                        if 'lift-api.vfsglobal.by' in url:
                             headers = request.get('headers', {})
                             
                             if 'authorize' in headers:
                                 self.authorize = headers['authorize']
-                                logger.info(f"✅ authorize получен ({len(self.authorize)} символов)")
+                                logger.info(f"✅ authorize: {len(self.authorize)} символов")
+                                tokens_found = True
                             
                             if 'clientsource' in headers:
                                 self.clientsource = headers['clientsource']
-                                logger.info(f"✅ clientsource получен ({len(self.clientsource)} символов)")
+                                logger.info(f"✅ clientsource: {len(self.clientsource)} символов")
+                                tokens_found = True
                             
                             if 'cookie' in headers or 'Cookie' in headers:
                                 self.cookies = headers.get('cookie') or headers.get('Cookie')
-                                logger.info(f"✅ cookies получены ({len(self.cookies)} символов)")
-                            
-                            if self.authorize and self.clientsource:
-                                logger.info("✅ Токены успешно обновлены!")
-                                return True
+                                logger.info(f"✅ cookies: {len(self.cookies)} символов")
+                                tokens_found = True
                 except:
                     continue
             
-            logger.warning("⚠️ Токены не найдены в логах, используем cookies из session")
+            # Если не нашли в логах, берем cookies из session
+            if not tokens_found or not self.cookies:
+                logger.info("🍪 Получаю cookies из session...")
+                cookies_list = []
+                for cookie in self.driver.get_cookies():
+                    cookies_list.append(f"{cookie['name']}={cookie['value']}")
+                self.cookies = "; ".join(cookies_list)
+                logger.info(f"✅ Cookies: {len(self.cookies)} символов")
             
-            # Получаем cookies из драйвера
-            cookies_list = []
-            for cookie in self.driver.get_cookies():
-                cookies_list.append(f"{cookie['name']}={cookie['value']}")
-            self.cookies = "; ".join(cookies_list)
+            # Закрываем браузер
+            try:
+                self.driver.quit()
+                self.driver = None
+            except:
+                pass
             
-            if self.cookies:
-                logger.info(f"✅ Cookies получены из session ({len(self.cookies)} символов)")
+            # Считаем успехом если хотя бы cookies есть
+            if self.cookies or self.authorize:
+                logger.info("✅ Токены обновлены!")
                 return True
             
+            logger.warning("⚠️ Не удалось получить токены")
             return False
             
         except Exception as e:
@@ -325,13 +339,12 @@ class AutoTokenVisaChecker:
                 logger.info(f"🔍 ПРОВЕРКА СЛОТОВ [{current_time}]")
                 logger.info(f"{'='*70}")
                 
-                # Обновляем токены перед проверкой
-                logger.info("⏰ Обновление токенов за 5 секунд до проверки...")
-                time.sleep(5)
-                
+                # Обновляем токены ПРЯМО ПЕРЕД проверкой (токены живут 4 минуты!)
+                logger.info("")
                 if not self.refresh_tokens_via_browser():
                     logger.warning("⚠️ Не удалось обновить токены, пробую с текущими...")
                 
+                logger.info("")
                 slot_found = False
                 
                 for i, payload in enumerate(self.payloads, 1):

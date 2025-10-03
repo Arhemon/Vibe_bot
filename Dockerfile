@@ -45,13 +45,16 @@ RUN echo "==> Installing Google Chrome..." && \
     google-chrome --version && \
     echo "==> Google Chrome installed successfully"
 
-# Устанавливаем ChromeDriver
+# Устанавливаем ChromeDriver (автоматически подбирает версию под Chrome)
 RUN echo "==> Installing ChromeDriver..." && \
-    CHROMEDRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE` && \
+    CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d '.' -f 1) && \
+    echo "Chrome major version: $CHROME_VERSION" && \
+    CHROMEDRIVER_VERSION=$(curl -sS "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_${CHROME_VERSION}") && \
     echo "ChromeDriver version: $CHROMEDRIVER_VERSION" && \
-    wget -q --continue -P /tmp "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" && \
-    unzip /tmp/chromedriver_linux64.zip -d /usr/local/bin/ && \
-    rm /tmp/chromedriver_linux64.zip && \
+    wget -q -O /tmp/chromedriver-linux64.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" && \
+    unzip /tmp/chromedriver-linux64.zip -d /tmp/ && \
+    mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/ && \
+    rm -rf /tmp/chromedriver-linux64.zip /tmp/chromedriver-linux64 && \
     chmod +x /usr/local/bin/chromedriver && \
     chromedriver --version && \
     echo "==> ChromeDriver installed successfully"
@@ -80,7 +83,7 @@ RUN echo "==> Bot files copied" && \
 # Устанавливаем переменные окружения
 ENV HEADLESS=true
 ENV PYTHONUNBUFFERED=1
-ENV CHECK_INTERVAL=300
+ENV CHECK_INTERVAL=180
 
 # Проверяем что всё готово
 RUN echo "==> Build completed successfully!" && \
